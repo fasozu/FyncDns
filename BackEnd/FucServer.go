@@ -59,6 +59,21 @@ func CheckServer(ctx *fasthttp.RequestCtx) {
 		response.Servers = append(response.Servers, server)
 	}
 	response.Ssl_grade = worstGrade
+
+	//Status code:
+	statusCode, _  := getUrlStatusCode(serverUrl)
+	response.StatusCode = statusCode
+	if statusCode == "200"{
+		response.Is_down = false
+	}else{
+		response.Is_down = true
+	}
+
+	title, icon, _ := getTitleAndIcon(serverUrl)
+	response.Title = title
+	response.Logo = icon
+	
+	
 	//---------------------
 	b, err := json.Marshal(response)
 	if err != nil {
@@ -127,15 +142,14 @@ func getOwnerAndCountry(ip string) (string,string,error){
 	var country string =  r.FindStringSubmatch(salida)[2]
 
 	return orgName,country,nil
-
 }
 
-func getOwnerAndCountry(url string) (string,error){
+func getUrlStatusCode(url string) (string,error){
 	//curl -sL -w "%{http_code}" -I "www.google.com" -o /dev/null
 	var cmdCurl = exec.Command(
 		"curl",
 		"-sL",
-		`-w "%{http_code}"`,
+		`-w%{http_code}`,
 		"-I",
 		url,
 		"-o",
@@ -147,6 +161,41 @@ func getOwnerAndCountry(url string) (string,error){
 	}
 
 	var salidaCurl string = string(outputCurl) 
-	fmt.Printf("%vCURLSTATUS\n", salidaCurl)
+	//fmt.Printf("%vCURLSTATUS\n", salidaCurl)
+	return salidaCurl,nil
+}
 
+func getTitleAndIcon(url string) (string,string,error){
+	
+
+	var title = ""
+	var icon = ""
+	
+	var cmd = exec.Command("curl", "-L", url)
+	output, err := cmd.Output()
+	if err != nil {
+		return title,icon,err
+	}
+	
+	var htmlPage string = string(output) 
+	
+	rTitle := regexp.MustCompile(`<title>([\w\W]*?)</title>`)
+	if len(rTitle.FindStringSubmatch(htmlPage))>1{
+		title = rTitle.FindStringSubmatch(htmlPage)[1]
+	}
+	
+
+	rIconTag := regexp.MustCompile(`(<link[^>]*?rel\s*="[^"]*?icon[^"]*?".*?>)`)
+	if len(rIconTag.FindStringSubmatch(htmlPage)) > 1{
+		iconoTag := rIconTag.FindStringSubmatch(htmlPage)[1]		
+		rIcon := regexp.MustCompile(`href\s*=\s*"([^"]*?)"`)
+		if len(rIcon.FindStringSubmatch(iconoTag))> 1{
+			icon = rIcon.FindStringSubmatch(iconoTag)[1]
+		}		
+	}
+	
+
+	
+	
+	return title,icon,nil
 }

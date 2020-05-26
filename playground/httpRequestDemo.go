@@ -9,7 +9,7 @@ import (
 
 func main() {
 	fmt.Println("Testing Http Request...")
-
+	
 
 	resp, err := http.Get("http://httpbin.org/get")
 	if err != nil {

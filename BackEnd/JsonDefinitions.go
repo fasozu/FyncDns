@@ -19,8 +19,8 @@ type OutputResponse struct {
 	Ssl_grade string `json:"ssl_grade"`
 	Logo string `json:"logo"`
 	Is_down bool `json:"is_down"`
-	StatusCode bool `json:"statusCode"`
-	
+	StatusCode string `json:"statusCode"`
+	Title string `json:"title"`
 }
 
 
