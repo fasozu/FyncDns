@@ -2,33 +2,50 @@ package BackEnd
 
 import (
     "fmt"
-	//"github.com/buaazp/fasthttprouter"
 	"io/ioutil"
 	"net/http"
     "github.com/valyala/fasthttp"	
 	"encoding/json"
 	"regexp"
 	"os/exec"
-	//"./DBHelper"
 	"crypto/md5"
     "encoding/hex"
 	"reflect"
+	"strings"
+	"strconv"
 )
 
+//Endpoint 1 - check url server
 func CheckServer(ctx *fasthttp.RequestCtx) {
-		
+	
 	ctx.Response.Header.Set("Access-Control-Allow-Origin", "*")
 	ctx.Response.Header.Set("Content-Type", "application/json")
 
-	var serverUrl string = fmt.Sprint(ctx.UserValue("serverUrl"))
-	var remoteAddress string = fmt.Sprint(ctx.RemoteIP().String())
-	
-	var hashIdentifier = GetMD5Hash(remoteAddress)
-	fmt.Println("Direccion remota: ",remoteAddress)
-	fmt.Println("Hash identifier: ",hashIdentifier)
 	var response OutputResponse
 	var responseCached OutputResponse
+
+	config, err := GetConfiguration()
 	
+	if err != nil{
+		response = OutputResponse{
+			Success: false,			
+			ErrorMessage: err.Error(),
+		}		
+		b, errJson := json.Marshal(response)
+		if errJson != nil {
+			fmt.Fprintf(ctx, "Error %s \n", errJson.Error())
+			return
+		}
+		fmt.Fprint(ctx, string(b))
+		return
+	}
+	
+	var serverUrl string = fmt.Sprint(ctx.UserValue("serverUrl"))
+	var remoteAddress string = fmt.Sprint(ctx.RemoteIP().String())	
+	var hashIdentifier = GetMD5Hash(remoteAddress)
+
+
+	//Opening DB--------------------------------------------
 	db, errDb := GetDb()
 	if errDb != nil{
 		response = OutputResponse{
@@ -44,7 +61,9 @@ func CheckServer(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	defer db.Close()
+	//------------------------------------------------------
 
+	//Save the url in client's  history --------------------
 	errAddCheckHistory := AddCheckHistory(db, hashIdentifier, serverUrl)
 	if errAddCheckHistory != nil{
 		response = OutputResponse{
@@ -59,24 +78,18 @@ func CheckServer(ctx *fasthttp.RequestCtx) {
 		fmt.Fprint(ctx, string(b))        				
 		return
 	}
+	//------------------------------------------------------
 
-	fmt.Println("After checksave")
-
+	//Load Cache--------------------------------------------
 	lastTimeChecked, jsonResponseCached, currentTime,_ := GetUrlCache(db, serverUrl)
 	if jsonResponseCached != ""{
 		json.Unmarshal([]byte(jsonResponseCached), &responseCached)
 	}
-	fmt.Println("lastTime")
-	fmt.Println(lastTimeChecked)
-	fmt.Println("currentTime")
-	fmt.Println(currentTime)
+	//------------------------------------------------------
 	
-	if (currentTime - 5) > lastTimeChecked || lastTimeChecked == 0 {//Cached invalid
-		//Get new info for url
-		responseRaw, err := getDataRawApi(serverUrl)
-		
-		if err != nil{
-			fmt.Println("Cannot get data raw")
+	if (currentTime - int64(config.CacheDurationSeconds)) > lastTimeChecked || lastTimeChecked == 0 {//Cached invalid		
+		responseRaw, err := getDataRawApi(serverUrl)		
+		if err != nil{			
 			response = OutputResponse{
 				Success: false,			
 				ErrorMessage: err.Error(),
@@ -90,13 +103,11 @@ func CheckServer(ctx *fasthttp.RequestCtx) {
 			return
 		}
 		
-
-		
 		response = OutputResponse{
 			Success: true,
 		}
 		
-		//---------------------	
+		//Check grade ------------------------------------------
 		var worstGrade string = ""
 		for _, endpoint := range responseRaw.Endpoints {
 			if worstGrade < endpoint.Grade {
@@ -113,15 +124,9 @@ func CheckServer(ctx *fasthttp.RequestCtx) {
 		}
 		response.Ssl_grade = worstGrade
 
-		//Status code:
-		statusCode, _  := getUrlStatusCode(serverUrl)
-		response.StatusCode = statusCode
-		if statusCode == "200"{
-			response.Is_down = false
-		}else{
-			response.Is_down = true
-		}
-
+		//Status server:
+		response.Is_down = getServerIsDown(serverUrl)
+		
 		title, icon, _ := getTitleAndIcon(serverUrl)
 		response.Title = title
 		response.Logo = icon
@@ -145,9 +150,8 @@ func CheckServer(ctx *fasthttp.RequestCtx) {
 		fmt.Fprint(ctx, string(b))            
 		
 	}else{
-		//use the cached
+		//use cached
 		
-		fmt.Println("Using cached")
 		responseCached.Is_cached = true
 		b, err := json.Marshal(responseCached)
 		if err != nil {
@@ -159,7 +163,7 @@ func CheckServer(ctx *fasthttp.RequestCtx) {
 	
 }
 
-
+//End point 2 - Check history
 func CheckServerHistory(ctx *fasthttp.RequestCtx) {
 	ctx.Response.Header.Set("Access-Control-Allow-Origin", "*")
 	ctx.Response.Header.Set("Content-Type", "application/json")
@@ -181,8 +185,6 @@ func CheckServerHistory(ctx *fasthttp.RequestCtx) {
 
 	var remoteAddress string = fmt.Sprint(ctx.RemoteIP().String())
 	var hashIdentifier = GetMD5Hash(remoteAddress)
-	fmt.Println("Direccion remota: ",remoteAddress)
-	fmt.Println("Hash identifier: ",hashIdentifier)
 
 	urls, err := GetCheckHistory(db, hashIdentifier)
 	if err != nil {
@@ -197,12 +199,10 @@ func CheckServerHistory(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	// For each url in check history return 
 	for _, url := range urls {
 		var urlInfo OutputResponse
 		_, jsonResponseCached, _, _ := GetUrlCache(db, url)
-		fmt.Println("------")
-		fmt.Println(url)
-		fmt.Println(jsonResponseCached)
 		if jsonResponseCached != "" {
 			json.Unmarshal([]byte(jsonResponseCached), &urlInfo)
 			response.Items = append(response.Items, urlInfo)
@@ -231,19 +231,18 @@ func CheckServerHistoryOptions(ctx *fasthttp.RequestCtx) {
 	fmt.Fprint(ctx, "")            
 }
 
+//Return the response from external api
 func getDataRawApi(url string) (*InputResponse,error){
-	fmt.Println("Testing Http Request...")
-
-	resp, err := http.Get(fmt.Sprintf("https://api.ssllabs.com/api/v3/analyze?host=%s", url))
+	config, _ := GetConfiguration()
+	
+	resp, err := http.Get(fmt.Sprintf("%s%s", config.ApiRootSslLabs, url))
 	if err != nil {
-		fmt.Println(err.Error())
 		return nil, err
 	}
 	defer resp.Body.Close()
 	
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println(err.Error())
 		return nil, err
 	}
 	var response InputResponse 
@@ -254,28 +253,35 @@ func getDataRawApi(url string) (*InputResponse,error){
 }
 
 
+// Return the Owner and Country of `ip`
 func getOwnerAndCountry(ip string) (string,string,error){
+	var orgName string 
+	var country string
 
+	
 	var cmd = exec.Command("whois", ip)
 	
-	output, err := cmd.Output()
-	if err != nil {
-		return "","",err
-	}
-
-	var salida string = string(output) 	
+	output, _ := cmd.Output()
+	
+	var outputWhois string = string(output) 	
 
 	r := regexp.MustCompile(`OrgName:\s*([\w\W]+?)\n[\w\W]*Country:\s*([\w\W]+?)\n`)
-	var orgName string = r.FindStringSubmatch(salida)[1]
-	var country string =  r.FindStringSubmatch(salida)[2]
-
+	infoMatched := r.FindStringSubmatch(outputWhois)
+	if len(infoMatched) > 2{
+		orgName = infoMatched[1]
+		country = infoMatched[2]
+	}
 	return orgName,country,nil
 }
 
+// Return http code from url, 000 if timeout
 func getUrlStatusCode(url string) (string,error){
-	//curl -sL -w "%{http_code}" -I "www.google.com" -o /dev/null
+	config, _ := GetConfiguration()
+	//curl  --max-time 6 -sL -w "%{http_code}" -I "www.google.com" -o /dev/null
 	var cmdCurl = exec.Command(
 		"curl",
+		"--max-time",
+		strconv.Itoa(config.UrlTimeoutSeconds),
 		"-sL",
 		`-w%{http_code}`,
 		"-I",
@@ -288,14 +294,12 @@ func getUrlStatusCode(url string) (string,error){
 		return "", errCurl
 	}
 
-	var salidaCurl string = string(outputCurl) 
-	//fmt.Printf("%vCURLSTATUS\n", salidaCurl)
-	return salidaCurl,nil
+	var responseCurl string = string(outputCurl) 
+	return responseCurl,nil
 }
 
-func getTitleAndIcon(url string) (string,string,error){
-	
-
+//Return title and icon from url's html 
+func getTitleAndIcon(url string) (string,string,error){	
 	var title = ""
 	var icon = ""
 	
@@ -311,7 +315,6 @@ func getTitleAndIcon(url string) (string,string,error){
 	if len(rTitle.FindStringSubmatch(htmlPage))>1{
 		title = rTitle.FindStringSubmatch(htmlPage)[1]
 	}
-	
 
 	rIconTag := regexp.MustCompile(`(<link[^>]*?rel\s*="[^"]*?icon[^"]*?".*?>)`)
 	if len(rIconTag.FindStringSubmatch(htmlPage)) > 1{
@@ -319,16 +322,27 @@ func getTitleAndIcon(url string) (string,string,error){
 		rIcon := regexp.MustCompile(`href\s*=\s*"([^"]*?)"`)
 		if len(rIcon.FindStringSubmatch(iconoTag))> 1{
 			icon = rIcon.FindStringSubmatch(iconoTag)[1]
+			if( !strings.HasPrefix(icon, "http://") && !strings.HasPrefix(icon, "https://") ){
+				icon = "http://"+url+"/"+icon
+			}
 		}		
-	}
-	
-
-	
-	
+	}	
 	return title,icon,nil
 }
 
+// Return true if server is down
+func getServerIsDown(serverUrl string) (bool){
+	config, _ := GetConfiguration()
+	statusCode, _  := getUrlStatusCode(serverUrl)
+	for _, downHttpCode := range config.ServerDownHttpCodes {
+        if statusCode == downHttpCode {
+            return true
+        }
+    }	
+	return false
+} 
 
+//Return the md5sum for input string
 func GetMD5Hash(text string) string {
     hasher := md5.New()
     hasher.Write([]byte(text))

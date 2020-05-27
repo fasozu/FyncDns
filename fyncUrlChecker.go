@@ -2,18 +2,16 @@ package main
 
 import (
 	"log"
-
-	"./BackEnd"
-	//"encoding/json"
-    
+	"./BackEnd"	    
     "github.com/buaazp/fasthttprouter"
     "github.com/valyala/fasthttp"
 )
 
-
-
 func main() {
-
+	config, err := BackEnd.GetConfiguration()
+	if err != nil{
+		log.Fatal(err.Error())
+	}
 	router := fasthttprouter.New()
         
     router.GET("/api/checkServer/:serverUrl", BackEnd.CheckServer)
@@ -24,5 +22,5 @@ func main() {
 	
     router.NotFound = fasthttp.FSHandler("./FrontEnd", 0)
         
-    log.Fatal(fasthttp.ListenAndServe(":8080", router.Handler))	
+    log.Fatal(fasthttp.ListenAndServe(config.ListenServer, router.Handler))	
 }

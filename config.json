@@ -1,0 +1,11 @@
+{
+  "listenServer": ":8080",
+  "CacheDurationSeconds": 6,
+  "apiRootSslLabs": "https://api.ssllabs.com/api/v3/analyze?host=",
+  "urlTimeoutSeconds": 6,
+  "serverDownHttpCodes": [
+    "500",
+    "000"
+  ],
+  "dBCockroachConnection": "postgresql://maxroach@localhost:26257/fucdb?ssl=true\u0026sslmode=require\u0026sslrootcert=certs/ca.crt\u0026sslkey=certs/client.maxroach.key\u0026sslcert=certs/client.maxroach.crt"
+}

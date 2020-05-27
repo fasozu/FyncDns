@@ -2,15 +2,13 @@ package BackEnd
 
 import (
     "database/sql"
-    "fmt"
-    //"log"
 	"time"
-    "github.com/lib/pq"    
+    "github.com/lib/pq"	
 )
 
 func GetDb()(*sql.DB, error){
-	db, err := sql.Open("postgres",
-        "postgresql://maxroach@localhost:26257/fucdb?ssl=true&sslmode=require&sslrootcert=certs/ca.crt&sslkey=certs/client.maxroach.key&sslcert=certs/client.maxroach.crt")
+	config, _ := GetConfiguration()
+	db, err := sql.Open("postgres",config.DBCockroachConnection)
     if err != nil {
         return nil, err
     }
@@ -32,7 +30,6 @@ func GetDb()(*sql.DB, error){
 
 // Return the lastTimeChecked int, jsonResponse string
 func GetUrlCache(db *sql.DB, url string)(int64, string, int64, error){
-
 	var lastTimeChecked int64 = 0
 	var jsonResponse string = ""
 	var currentTime int64 = 0
@@ -40,17 +37,12 @@ func GetUrlCache(db *sql.DB, url string)(int64, string, int64, error){
 	var lastTimeCheckedTime time.Time 
 	var currentTimeTime time.Time 
 
-	
-	// Print out the balances.
 	err := db.QueryRow("SELECT lastTimeChecked, jsonResponse, NOW() as currentTime FROM urlCache WHERE url=$1", url).Scan(&lastTimeCheckedTime, &jsonResponse, &currentTimeTime)
 	
 	if err == sql.ErrNoRows {
-		fmt.Println("NO CACHE")
 		return 0,"",0,nil
 	}
 	if err != nil {
-		fmt.Println("OTHER ERROR")
-		fmt.Println(err.Error())
 		return 0,"",0,err
 	}
 
@@ -107,29 +99,25 @@ func AddCheckHistory(db *sql.DB, hashIdentifier string, url string)(error){
 
 // Add or update url cache
 func AddUrlCache(db *sql.DB, url string, jsonResponse string)(error){
-	fmt.Println("Adding url cache")
+
 	insertStatement := `INSERT INTO urlCache (url,jsonResponse,lastTimeChecked) VALUES ($1,$2,NOW())`
 	_, err := db.Exec(insertStatement, url, jsonResponse)
 	if err != nil {
 		if err, ok := err.(*pq.Error); ok {
-			fmt.Println("Unique error0")
 			if err.Code.Name() == "unique_violation"{//If exists, update
-				fmt.Println("Unique error")
 				updateStatement := `UPDATE urlCache SET url=$1, jsonResponse=$2, lastTimeChecked=NOW() WHERE url=$1`
 				_, errUpdate := db.Exec(updateStatement, url, jsonResponse)
 				if errUpdate != nil {
-					fmt.Println("update error")
 					return errUpdate
 				}else{
 					return nil
 				}				
-			}else{
-				fmt.Println("insert error")
+			}else{				
 				return err
 			}						
 		}		
 	}
-	fmt.Println("Inserted")
+	
 	return nil
 }
 
