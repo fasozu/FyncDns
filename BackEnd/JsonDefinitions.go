@@ -21,8 +21,16 @@ type OutputResponse struct {
 	Is_down bool `json:"is_down"`
 	StatusCode string `json:"statusCode"`
 	Title string `json:"title"`
+	Previous_ssl_grade string `json:"previous_ssl_grade"`
+	Is_cached bool `json:"is_cached"`
+	Url string `json:"url"`
 }
 
+type OutputResponseHistory struct {
+	Success bool `json:"success"`
+	ErrorMessage string `json:"errorMessage"`
+	Items []OutputResponse `json:"items"`
+}
 
 //Input Json definition por api.sllabs
 type InputEndpoint struct {
@@ -51,8 +59,3 @@ type InputResponse struct {
 	Servers []OutputServer `json:"servers"`
 	Endpoints []InputEndpoint `json:"Endpoints"`
 }
-
-
-
-	
-
